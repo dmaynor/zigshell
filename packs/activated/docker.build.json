@@ -1,0 +1,68 @@
+{
+  "id": "docker.build",
+  "name": "docker build",
+  "binary": "docker",
+  "version": 1,
+  "risk": "local_write",
+  "capabilities": ["container.build"],
+  "flags": [
+    {
+      "name": "tag",
+      "short": 116,
+      "arg_type": "string",
+      "required": false,
+      "description": "Name and optional tag (name:tag)",
+      "multiple": true
+    },
+    {
+      "name": "file",
+      "short": 102,
+      "arg_type": "path",
+      "required": false,
+      "description": "Path to Dockerfile"
+    },
+    {
+      "name": "build-arg",
+      "arg_type": "string",
+      "required": false,
+      "description": "Build-time variable (KEY=VALUE)",
+      "multiple": true
+    },
+    {
+      "name": "no-cache",
+      "arg_type": "bool",
+      "required": false,
+      "description": "Do not use cache when building"
+    },
+    {
+      "name": "platform",
+      "arg_type": "enum",
+      "required": false,
+      "description": "Target platform",
+      "enum_values": ["linux/amd64", "linux/arm64", "linux/arm/v7"]
+    },
+    {
+      "name": "target",
+      "arg_type": "string",
+      "required": false,
+      "description": "Set the target build stage"
+    },
+    {
+      "name": "quiet",
+      "short": 113,
+      "arg_type": "bool",
+      "required": false,
+      "description": "Suppress build output"
+    }
+  ],
+  "positionals": [
+    {
+      "name": "context",
+      "arg_type": "path",
+      "required": true,
+      "description": "Build context directory"
+    }
+  ],
+  "subcommands": [],
+  "exclusive_groups": []
+}

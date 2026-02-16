@@ -1,0 +1,46 @@
+{
+  "id": "git.commit",
+  "name": "git commit",
+  "binary": "git",
+  "version": 1,
+  "risk": "local_write",
+  "capabilities": ["vcs.write"],
+  "flags": [
+    {
+      "name": "message",
+      "short": 109,
+      "arg_type": "string",
+      "required": true,
+      "description": "Commit message"
+    },
+    {
+      "name": "all",
+      "short": 97,
+      "arg_type": "bool",
+      "required": false,
+      "description": "Stage all modified and deleted files"
+    },
+    {
+      "name": "amend",
+      "arg_type": "bool",
+      "required": false,
+      "description": "Amend the previous commit"
+    },
+    {
+      "name": "no-edit",
+      "arg_type": "bool",
+      "required": false,
+      "description": "Use previous commit message without editing"
+    },
+    {
+      "name": "signoff",
+      "short": 115,
+      "arg_type": "bool",
+      "required": false,
+      "description": "Add Signed-off-by trailer"
+    }
+  ],
+  "positionals": [],
+  "subcommands": [],
+  "exclusive_groups": []
+}

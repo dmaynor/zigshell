@@ -1,58 +1,189 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const Command = @import("command.zig").Command;
+const auth = @import("../policy/authority.zig");
+const enforcer = @import("../policy/enforcer.zig");
 
 /// Result of a structured command execution.
 pub const ExecResult = struct {
     exit_code: u8,
-    /// Whether the process was killed due to timeout
     timed_out: bool,
 };
 
+/// Errors from the execution pipeline.
+pub const ExecError = error{
+    AuthorityDenied,
+    SpawnFailed,
+    OutOfMemory,
+};
+
+/// Configuration for execution.
+pub const ExecConfig = struct {
+    /// Timeout in milliseconds. 0 = no timeout.
+    timeout_ms: u64 = 30_000,
+};
+
 /// Execute a validated Command as a child process.
-/// INVARIANT: This function must NEVER use shell interpretation.
+///
+/// INVARIANT: This function NEVER uses shell interpretation.
 /// It calls std.process.Child directly with an argument array.
 ///
-/// Callers MUST validate the command against schema and authority
-/// BEFORE calling this function. The executor does not check authority.
-pub fn execute(allocator: std.mem.Allocator, cmd: Command) !ExecResult {
-    // Build argv: binary + args
-    var argv = std.ArrayList([]const u8).init(allocator);
-    defer argv.deinit();
-    try argv.append(cmd.binary);
-    try argv.appendSlice(cmd.args);
-
-    var child = std.process.Child.init(argv.items, allocator);
-    child.cwd = std.fs.cwd().openDir(cmd.cwd, .{}) catch |err| return err;
-
-    // Apply environment delta
-    if (cmd.env_delta.len > 0) {
-        var env_map = std.process.EnvMap.init(allocator);
-        defer env_map.deinit();
-        for (cmd.env_delta) |entry| {
-            try env_map.put(entry.key, entry.value);
-        }
-        child.env = env_map;
+/// The execution pipeline:
+/// 1. Authority check via enforcer (MANDATORY — INV-3)
+/// 2. Build argv array: [binary] + args
+/// 3. Spawn child process
+/// 4. Wait for completion or timeout
+/// 5. Return exit code
+pub fn execute(
+    allocator: Allocator,
+    cmd: Command,
+    token: auth.AuthorityToken,
+    config: ExecConfig,
+) ExecError!ExecResult {
+    // Gate 1: Authority check (INV-3, INV-10)
+    const enforcement = enforcer.check(token, cmd);
+    switch (enforcement) {
+        .allowed => {},
+        .denied => return ExecError.AuthorityDenied,
     }
 
-    _ = try child.spawnAndWait();
+    // Gate 2: Build argv — [binary, args...]
+    var argv: std.ArrayList([]const u8) = .empty;
+    defer argv.deinit(allocator);
+    argv.append(allocator, cmd.binary) catch return ExecError.OutOfMemory;
+    argv.appendSlice(allocator, cmd.args) catch return ExecError.OutOfMemory;
 
-    // TODO: Phase 2 will flesh out full execution with timeout,
-    // resource limits, and result capture.
+    // Gate 3: Spawn and wait (no shell — direct exec)
+    _ = config; // timeout will be implemented with timerfd in a future iteration
+    var child = std.process.Child.init(argv.items, allocator);
+    const term = child.spawnAndWait() catch return ExecError.SpawnFailed;
+
+    const code: u8 = switch (term) {
+        .Exited => |c| c,
+        .Signal => 128,
+        .Stopped => 127,
+        .Unknown => 1,
+    };
     return ExecResult{
-        .exit_code = 0,
+        .exit_code = code,
         .timed_out = false,
     };
 }
 
-test "executor module compiles" {
-    // Structural test — actual execution tested in integration tests
+// ─── Tests ───────────────────────────────────────────────────────
+
+test "execute: authority denied blocks execution" {
+    const token = auth.AuthorityToken{
+        .project_id = [_]u8{0} ** 32,
+        .level = .observe, // Cannot execute anything
+        .expiration = 0,
+        .allowed_tools = &.{},
+        .allowed_bins = &.{},
+        .fs_root = "/",
+        .network = .deny,
+    };
     const cmd = Command{
-        .tool_id = "test",
+        .tool_id = "git.status",
+        .binary = "/usr/bin/git",
+        .args = &.{"status"},
+        .cwd = "/home/user/project",
+        .env_delta = &.{},
+        .requested_capabilities = &.{},
+    };
+
+    const result = execute(std.testing.allocator, cmd, token, .{});
+    try std.testing.expectError(ExecError.AuthorityDenied, result);
+}
+
+test "execute: /bin/true succeeds with exit code 0" {
+    const token = auth.AuthorityToken{
+        .project_id = [_]u8{0} ** 32,
+        .level = .parameterized_tools,
+        .expiration = 0,
+        .allowed_tools = &.{"test.true"},
+        .allowed_bins = &.{"/bin/true"},
+        .fs_root = "/",
+        .network = .deny,
+    };
+    const cmd = Command{
+        .tool_id = "test.true",
         .binary = "/bin/true",
         .args = &.{},
         .cwd = "/tmp",
         .env_delta = &.{},
         .requested_capabilities = &.{},
     };
-    _ = cmd;
+
+    const result = try execute(std.testing.allocator, cmd, token, .{});
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    try std.testing.expect(!result.timed_out);
+}
+
+test "execute: /bin/false returns exit code 1" {
+    const token = auth.AuthorityToken{
+        .project_id = [_]u8{0} ** 32,
+        .level = .parameterized_tools,
+        .expiration = 0,
+        .allowed_tools = &.{"test.false"},
+        .allowed_bins = &.{"/bin/false"},
+        .fs_root = "/",
+        .network = .deny,
+    };
+    const cmd = Command{
+        .tool_id = "test.false",
+        .binary = "/bin/false",
+        .args = &.{},
+        .cwd = "/tmp",
+        .env_delta = &.{},
+        .requested_capabilities = &.{},
+    };
+
+    const result = try execute(std.testing.allocator, cmd, token, .{});
+    try std.testing.expectEqual(@as(u8, 1), result.exit_code);
+}
+
+test "execute: tool not in allow list denied" {
+    const token = auth.AuthorityToken{
+        .project_id = [_]u8{0} ** 32,
+        .level = .scoped_commands,
+        .expiration = 0,
+        .allowed_tools = &.{"git.status"},
+        .allowed_bins = &.{"/usr/bin/git"},
+        .fs_root = "/",
+        .network = .deny,
+    };
+    const cmd = Command{
+        .tool_id = "rm.rf",
+        .binary = "/bin/rm",
+        .args = &.{ "-rf", "/" },
+        .cwd = "/tmp",
+        .env_delta = &.{},
+        .requested_capabilities = &.{},
+    };
+
+    const result = execute(std.testing.allocator, cmd, token, .{});
+    try std.testing.expectError(ExecError.AuthorityDenied, result);
+}
+
+test "execute: nonexistent binary fails spawn" {
+    const token = auth.AuthorityToken{
+        .project_id = [_]u8{0} ** 32,
+        .level = .scoped_commands,
+        .expiration = 0,
+        .allowed_tools = &.{"test.nope"},
+        .allowed_bins = &.{"/nonexistent/binary"},
+        .fs_root = "/",
+        .network = .deny,
+    };
+    const cmd = Command{
+        .tool_id = "test.nope",
+        .binary = "/nonexistent/binary",
+        .args = &.{},
+        .cwd = "/tmp",
+        .env_delta = &.{},
+        .requested_capabilities = &.{},
+    };
+
+    const result = execute(std.testing.allocator, cmd, token, .{});
+    try std.testing.expectError(ExecError.SpawnFailed, result);
 }

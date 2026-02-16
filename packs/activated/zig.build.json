@@ -1,0 +1,41 @@
+{
+  "id": "zig.build",
+  "name": "zig build",
+  "binary": "zig",
+  "version": 1,
+  "risk": "local_write",
+  "capabilities": ["build.compile"],
+  "flags": [
+    {
+      "name": "optimize",
+      "arg_type": "enum",
+      "required": false,
+      "description": "Optimization mode",
+      "enum_values": ["Debug", "ReleaseSafe", "ReleaseFast", "ReleaseSmall"]
+    },
+    {
+      "name": "target",
+      "arg_type": "string",
+      "required": false,
+      "description": "Cross-compilation target triple"
+    },
+    {
+      "name": "verbose",
+      "arg_type": "bool",
+      "required": false,
+      "description": "Print verbose compilation output"
+    },
+    {
+      "name": "jobs",
+      "short": 106,
+      "arg_type": "int",
+      "required": false,
+      "description": "Number of parallel compilation jobs",
+      "range_min": 1,
+      "range_max": 256
+    }
+  ],
+  "positionals": [],
+  "subcommands": [],
+  "exclusive_groups": []
+}

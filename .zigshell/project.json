@@ -1,0 +1,16 @@
+{
+  "authority_level": "parameterized_tools",
+  "allowed_tools": [
+    "git.commit",
+    "git.status",
+    "zig.build",
+    "zig.test"
+  ],
+  "allowed_bins": [
+    "/usr/bin/git",
+    "/snap/bin/zig"
+  ],
+  "fs_root": ".",
+  "network": "deny",
+  "expiration_seconds": 0
+}
