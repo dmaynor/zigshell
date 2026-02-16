@@ -24,6 +24,11 @@ pub const ai_validator = @import("ai/validator.zig");
 pub const ai_learning = @import("ai/learning.zig");
 pub const ai_ranker = @import("ai/ranker.zig");
 
+// Shell modules
+pub const shell_tokenizer = @import("shell/tokenizer.zig");
+pub const shell_input_parser = @import("shell/input_parser.zig");
+pub const shell_repl = @import("shell/repl.zig");
+
 // Research modules
 pub const research_mode = @import("research/mode.zig");
 pub const research_sandbox = @import("research/sandbox.zig");
@@ -99,6 +104,8 @@ pub fn main() !void {
         try cmdExec(gpa, stdout, stderr, args[2..], &store, token);
     } else if (std.mem.eql(u8, subcmd, "pack")) {
         try cmdPack(gpa, stdout, stderr, args[2..]);
+    } else if (std.mem.eql(u8, subcmd, "shell")) {
+        try cmdShell(gpa, &store, token, cwd);
     } else {
         try fprint(stderr, "Unknown command: {s}\n\n", .{subcmd});
         try printUsage(stderr);
@@ -114,6 +121,7 @@ fn printUsage(out: std.fs.File) !void {
         \\Usage: zigshell <command> [options]
         \\
         \\Commands:
+        \\  shell         Interactive shell mode (REPL)
         \\  info          Show project authority and loaded schemas
         \\  schemas       List all loaded tool schemas
         \\  validate      Validate an AI plan (dry-run)
@@ -324,6 +332,18 @@ fn cmdExec(
         const status: []const u8 = if (result.exit_code == 0) "OK" else "FAIL";
         try fprint(out, "  step {d}: {s} [{s}] exit={d}\n", .{ i, step.tool_id, status, result.exit_code });
     }
+}
+
+fn cmdShell(
+    gpa: Allocator,
+    store: *const schema_json.SchemaStore,
+    token: authority.AuthorityToken,
+    cwd: []const u8,
+) !void {
+    var learn = ai_learning.LearningStore.init(gpa);
+    defer learn.deinit();
+
+    try shell_repl.run(gpa, store, token, cwd, &learn);
 }
 
 fn cmdPack(
