@@ -7,8 +7,9 @@
     "zig.test"
   ],
   "allowed_bins": [
-    "/usr/bin/git",
-    "/snap/bin/zig"
+    "git",
+    "zig",
+    "docker"
   ],
   "fs_root": ".",
   "network": "deny",

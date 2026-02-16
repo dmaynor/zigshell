@@ -104,7 +104,7 @@ pub fn loadFromProjectRoot(
 }
 
 /// Default token: Observe level, no tools, no execution.
-fn defaultToken(project_root: []const u8) auth.AuthorityToken {
+pub fn defaultToken(project_root: []const u8) auth.AuthorityToken {
     var project_id: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(project_root, &project_id, .{});
 
