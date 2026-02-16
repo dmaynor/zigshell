@@ -29,6 +29,9 @@ pub const research_mode = @import("research/mode.zig");
 pub const research_sandbox = @import("research/sandbox.zig");
 pub const research_pack_diff = @import("research/pack_diff.zig");
 
+// Integration tests
+pub const integration_test = @import("integration_test.zig");
+
 const version = "0.1.0";
 
 /// Format and write to a file using a stack buffer.
@@ -79,7 +82,11 @@ pub fn main() !void {
     var cwd_buf: [4096]u8 = undefined;
     const cwd = std.fs.cwd().realpath(".", &cwd_buf) catch ".";
 
-    const token = loader.loadFromProjectRoot(gpa, cwd) catch loader.defaultToken(cwd);
+    var loaded_auth = loader.loadFromProjectRoot(gpa, cwd) catch loader.LoadedAuthority{
+        .token = loader.defaultToken(cwd),
+    };
+    defer loaded_auth.deinit();
+    const token = loaded_auth.token;
 
     // Dispatch
     if (std.mem.eql(u8, subcmd, "info")) {

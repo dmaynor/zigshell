@@ -138,11 +138,13 @@ pub const SchemaStore = struct {
         const id = parsed.value.id;
 
         // INV-8: Reject schema version downgrade
-        if (self.schemas.get(id)) |existing| {
+        if (self.schemas.getPtr(id)) |existing| {
             if (parsed.value.version <= existing.parsed.value.version) {
                 // errdefer will handle cleanup
                 return error.SchemaVersionDowngrade;
             }
+            // Free old version before replacing (prevents memory leak)
+            existing.parsed.deinit();
         }
 
         try self.schemas.put(id, .{ .parsed = parsed });

@@ -27,20 +27,36 @@ pub const LoadError = error{
     InvalidNetworkPolicy,
 };
 
+/// Result of loading authority config. Owns the parsed JSON arena
+/// so the AuthorityToken's borrowed slices (allowed_tools, allowed_bins)
+/// remain valid for the lifetime of this struct.
+pub const LoadedAuthority = struct {
+    token: auth.AuthorityToken,
+    /// Internal: keeps JSON arena alive so token's slices are valid.
+    /// null when using default token (no JSON to own).
+    _parsed: ?std.json.Parsed(ProjectConfig) = null,
+
+    pub fn deinit(self: *LoadedAuthority) void {
+        if (self._parsed) |*p| p.deinit();
+    }
+};
+
 /// Load a project authority config from a JSON string.
-/// Returns an AuthorityToken for the given project root.
+/// Returns a LoadedAuthority whose token borrows slices from the parsed JSON.
+/// Caller must keep the LoadedAuthority alive while using the token,
+/// and call deinit() when done.
 pub fn loadFromJson(
     allocator: Allocator,
     json_str: []const u8,
     project_root: []const u8,
-) LoadError!auth.AuthorityToken {
+) LoadError!LoadedAuthority {
     const parsed = std.json.parseFromSlice(
         ProjectConfig,
         allocator,
         json_str,
         .{ .allocate = .alloc_always },
     ) catch return LoadError.ConfigMalformed;
-    defer parsed.deinit();
+    errdefer parsed.deinit();
 
     const config = parsed.value;
 
@@ -68,14 +84,17 @@ pub fn loadFromJson(
     else
         config.fs_root;
 
-    return auth.AuthorityToken{
-        .project_id = project_id,
-        .level = level,
-        .expiration = expiration,
-        .allowed_tools = config.allowed_tools,
-        .allowed_bins = config.allowed_bins,
-        .fs_root = fs_root,
-        .network = network,
+    return LoadedAuthority{
+        .token = auth.AuthorityToken{
+            .project_id = project_id,
+            .level = level,
+            .expiration = expiration,
+            .allowed_tools = config.allowed_tools,
+            .allowed_bins = config.allowed_bins,
+            .fs_root = fs_root,
+            .network = network,
+        },
+        ._parsed = parsed,
     };
 }
 
@@ -84,7 +103,7 @@ pub fn loadFromJson(
 pub fn loadFromProjectRoot(
     allocator: Allocator,
     project_root: []const u8,
-) LoadError!auth.AuthorityToken {
+) LoadError!LoadedAuthority {
     // Build path: {project_root}/.zigshell/project.json
     var path_buf: [4096]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/.zigshell/project.json", .{project_root}) catch
@@ -92,7 +111,7 @@ pub fn loadFromProjectRoot(
 
     const file = std.fs.cwd().openFile(path, .{}) catch {
         // No config file → default to Observe (INV-3: no implicit authority)
-        return defaultToken(project_root);
+        return defaultLoaded(project_root);
     };
     defer file.close();
 
@@ -116,6 +135,14 @@ pub fn defaultToken(project_root: []const u8) auth.AuthorityToken {
         .allowed_bins = &.{},
         .fs_root = project_root,
         .network = .deny,
+    };
+}
+
+/// Default loaded authority (observe level). The _parsed field uses
+/// a zero-initialized sentinel since there's no JSON to own.
+fn defaultLoaded(project_root: []const u8) LoadedAuthority {
+    return LoadedAuthority{
+        .token = defaultToken(project_root),
     };
 }
 
@@ -148,27 +175,34 @@ const valid_config_json =
 ;
 
 test "loadFromJson: valid config" {
-    const token = try loadFromJson(
+    var loaded = try loadFromJson(
         std.testing.allocator,
         valid_config_json,
         "/home/user/project",
     );
-    try std.testing.expectEqual(auth.AuthorityLevel.parameterized_tools, token.level);
-    try std.testing.expectEqual(auth.NetworkPolicy.deny, token.network);
-    try std.testing.expectEqual(@as(i64, 0), token.expiration);
-    try std.testing.expectEqual(@as(usize, 3), token.allowed_tools.len);
-    try std.testing.expectEqual(@as(usize, 2), token.allowed_bins.len);
+    defer loaded.deinit();
+
+    try std.testing.expectEqual(auth.AuthorityLevel.parameterized_tools, loaded.token.level);
+    try std.testing.expectEqual(auth.NetworkPolicy.deny, loaded.token.network);
+    try std.testing.expectEqual(@as(i64, 0), loaded.token.expiration);
+    try std.testing.expectEqual(@as(usize, 3), loaded.token.allowed_tools.len);
+    try std.testing.expectEqual(@as(usize, 2), loaded.token.allowed_bins.len);
+    // Verify slices are actually readable (use-after-free would crash here)
+    try std.testing.expectEqualStrings("git.commit", loaded.token.allowed_tools[0]);
+    try std.testing.expectEqualStrings("/usr/bin/git", loaded.token.allowed_bins[0]);
 }
 
 test "loadFromJson: minimal config defaults to observe" {
-    const token = try loadFromJson(
+    var loaded = try loadFromJson(
         std.testing.allocator,
         "{}",
         "/tmp/test",
     );
-    try std.testing.expectEqual(auth.AuthorityLevel.observe, token.level);
-    try std.testing.expectEqual(auth.NetworkPolicy.deny, token.network);
-    try std.testing.expectEqualStrings("/tmp/test", token.fs_root);
+    defer loaded.deinit();
+
+    try std.testing.expectEqual(auth.AuthorityLevel.observe, loaded.token.level);
+    try std.testing.expectEqual(auth.NetworkPolicy.deny, loaded.token.network);
+    try std.testing.expectEqualStrings("/tmp/test", loaded.token.fs_root);
 }
 
 test "loadFromJson: invalid level rejected" {
