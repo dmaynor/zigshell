@@ -244,6 +244,8 @@ Example schema (`git.commit.json`):
 }
 ```
 
+**Note**: The `short` field contains ASCII codes for short flag characters (109 = 'm', 97 = 'a'). This allows typed storage and validation of single-character flags.
+
 ## Security
 
 ### Architectural Invariants
